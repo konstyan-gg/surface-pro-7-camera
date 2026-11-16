@@ -1,4 +1,7 @@
 [Unit]
+# Only for real login users, not the GDM greeter (uid<1000): its copies
+# would grab the v4l2loopback devices before the user logs in.
+ConditionUser=!@system
 Description=SP7 camera on-demand controller
 
 Requires=sp7-camera-relay@standard.service
