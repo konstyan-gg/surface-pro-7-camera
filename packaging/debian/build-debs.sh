@@ -121,7 +121,7 @@ Depends: dkms (>= 3), build-essential, linux-headers-surface | linux-headers-amd
 Recommends: sp7-camera
 Section: kernel
 Priority: optional
-Homepage: https://github.com/Elefantenjongleur/surface-pro-7-camera
+Homepage: https://github.com/konstyan-gg/surface-pro-7-camera
 Installed-Size: $(du -sk "$D/usr" | cut -f1)
 Description: Surface Pro 7 camera kernel modules (DKMS)
  Patched OV8865 sensor, DW9719 VCM and IPU bridge drivers, the patched
@@ -243,7 +243,7 @@ Depends: sp7-camera-dkms (= $VERSION-$DEBREV), pipewire (>= 1.4), wireplumber (>
 Recommends: sp7-camera-firmware
 Section: video
 Priority: optional
-Homepage: https://github.com/Elefantenjongleur/surface-pro-7-camera
+Homepage: https://github.com/konstyan-gg/surface-pro-7-camera
 Installed-Size: $(du -sk "$U" | cut -f1)
 Description: Surface Pro 7 cameras (rear OV8865 + front OV5693) userspace stack
  Patched libcamera 0.7.2 and PipeWire libcamera SPA, the on-demand controller

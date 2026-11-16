@@ -1,5 +1,7 @@
 # Surface Pro 7 Camera for Linux (Debian fork)
 
+Repository: <https://github.com/konstyan-gg/surface-pro-7-camera>
+
 Experimental camera support for the rear OV8865 and front OV5693 RGB
 cameras of the Microsoft Surface Pro 7.
 
@@ -70,7 +72,7 @@ opens one of the virtual cameras.
 
 ## Installation from binary packages (Debian 13)
 
-Prebuilt packages are attached to the GitHub releases of this fork:
+Prebuilt packages are attached to the [GitHub releases](https://github.com/konstyan-gg/surface-pro-7-camera/releases) of this fork:
 
 | File | Contents |
 | --- | --- |
@@ -96,7 +98,9 @@ SHA-256 (`sp7-camera-fetch-firmware`).
 ### 2. Install
 
     mkdir sp7 && cd sp7
-    # download all files of a release into this directory, then:
+    for f in sp7-camera-dkms_0.2.0-1_all.deb sp7-camera_0.2.0-1_amd64.deb install-debs.sh SHA256SUMS; do
+        curl -fLO https://github.com/konstyan-gg/surface-pro-7-camera/releases/download/v0.2.0/$f
+    done
     sha256sum -c SHA256SUMS
     bash install-debs.sh .
 
