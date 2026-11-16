@@ -36,6 +36,7 @@ PipeWire:
   describe: 1.4.11
   local release delta:
     patches/pipewire/0001-sp7-libcamera-profiles.patch
+    patches/pipewire/0002-sp7-front-camera-profiles.patch (Debian fork)
   note:
     Only the libcamera SPA changes are part of the SP7 release.
     The local gstpipewiresrc.c diagnostic force-copy experiment is excluded.
@@ -46,3 +47,9 @@ IPU4 firmware:
   file: firmware/ipu4-20191030.bin
   installed as: /usr/lib/firmware/ipu4p_cpd.bin
   sha256: ff2c36cc81a5c726508b22970c2e2538ff06107dc5a72c93401403c227e5157f
+
+Debian fork additions:
+  patches/ipu4/0002-sp7-front-fw-recycle.patch
+  patches/libcamera/0002-sp7-front-camera.patch
+  patches/pipewire/0002-sp7-front-camera-profiles.patch
+  Tested: Debian 13 trixie, kernel 6.19.8-surface-3, Secure Boot enabled.

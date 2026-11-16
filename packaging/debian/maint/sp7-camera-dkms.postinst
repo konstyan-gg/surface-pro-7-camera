@@ -1,0 +1,33 @@
+#!/bin/sh
+set -e
+NAME=sp7-camera
+VER=@VERSION@
+MODS="ov8865 dw9719 ipu-bridge intel-ipu4p intel-ipu4p-isys intel-ipu4p-psys intel-ipu4p-isys-csslib intel-ipu4p-psys-csslib v4l2loopback"
+
+if [ "$1" = configure ]; then
+	# Copies installed by hand (install.sh) would shadow the DKMS modules.
+	for d in /lib/modules/*/updates/extra; do
+		[ -d "$d" ] || continue
+		k=$(basename "$(dirname "$(dirname "$d")")")
+		for m in $MODS; do
+			if [ -f "$d/$m.ko" ]; then
+				mkdir -p "/var/lib/sp7-camera/pre-dkms/$k"
+				mv "$d/$m.ko" "/var/lib/sp7-camera/pre-dkms/$k/"
+			fi
+		done
+	done
+	dkms add -m $NAME -v $VER 2>/dev/null || true
+	for k in /lib/modules/*; do
+		k=${k##*/}
+		[ -e "/lib/modules/$k/build/Makefile" ] || continue
+		dkms install -m $NAME -v $VER -k "$k" --force \
+			|| echo "sp7-camera-dkms: build failed for $k (see /var/lib/dkms/$NAME/$VER/build/make.log)" >&2
+	done
+	if command -v mokutil >/dev/null 2>&1 && mokutil --sb-state 2>/dev/null | grep -qi enabled \
+	   && ! mokutil --test-key /var/lib/dkms/mok.pub 2>/dev/null | grep -q 'already enrolled'; then
+		echo "sp7-camera-dkms: Secure Boot is on and the DKMS signing key is NOT enrolled. Run" >&2
+		echo "    sudo mokutil --import /var/lib/dkms/mok.pub" >&2
+		echo "then reboot and confirm the key in MokManager." >&2
+	fi
+fi
+exit 0

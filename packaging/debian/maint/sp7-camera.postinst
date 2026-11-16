@@ -1,0 +1,17 @@
+#!/bin/sh
+set -e
+if [ "$1" = configure ]; then
+	ldconfig
+	udevadm control --reload 2>/dev/null || true
+	[ -d /run/systemd/system ] && systemctl daemon-reload || true
+	# sp7-camera-boot.service is started by the timer, 30 s after boot.
+	systemctl disable sp7-camera-boot.service >/dev/null 2>&1 || true
+	systemctl enable sp7-camera-boot.timer >/dev/null 2>&1 || true
+	systemctl --global enable sp7-camera-controller.service sp7-audio-fix.service >/dev/null 2>&1 || true
+	if [ ! -f /usr/lib/firmware/ipu4p_cpd.bin ]; then
+		echo "sp7-camera: IPU4P firmware missing. Install it with:" >&2
+		echo "    sudo /usr/local/sbin/sp7-camera-fetch-firmware" >&2
+	fi
+	echo "sp7-camera: reboot to start the cameras."
+fi
+exit 0

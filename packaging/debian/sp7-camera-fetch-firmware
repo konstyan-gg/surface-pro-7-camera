@@ -1,0 +1,32 @@
+#!/bin/sh
+# SPDX-License-Identifier: GPL-2.0-or-later
+# Download the Intel IPU4P firmware from its pinned upstream commit, verify it
+# and install it as /usr/lib/firmware/ipu4p_cpd.bin.
+# The firmware is a proprietary Intel blob and is therefore not shipped in the
+# published packages.
+set -eu
+
+COMMIT=4ea36123f12e8eafe4f12017614e7b642feb5430
+SHA256=ff2c36cc81a5c726508b22970c2e2538ff06107dc5a72c93401403c227e5157f
+URL="https://media.githubusercontent.com/media/ruslanbay/ipu4-drivers/$COMMIT/firmware/ipu4-20191030.bin"
+DEST=/usr/lib/firmware/ipu4p_cpd.bin
+
+if [ -f "$DEST" ] && echo "$SHA256  $DEST" | sha256sum -c - >/dev/null 2>&1; then
+	echo "IPU4P firmware already installed and verified: $DEST"
+	exit 0
+fi
+
+[ "$(id -u)" -eq 0 ] || { echo "Run as root: sudo $0" >&2; exit 1; }
+
+SRC=${1:-}
+TMP=$(mktemp)
+trap 'rm -f "$TMP"' EXIT
+if [ -n "$SRC" ]; then
+	cp "$SRC" "$TMP"
+else
+	echo "Downloading $URL"
+	curl -fL --retry 3 -o "$TMP" "$URL"
+fi
+echo "$SHA256  $TMP" | sha256sum -c -
+install -D -m 0644 "$TMP" "$DEST"
+echo "Installed $DEST. Reboot to load the camera stack."

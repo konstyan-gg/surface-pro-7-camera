@@ -6,3 +6,5 @@
 .DS_Store
 build/
 builddir/
+packaging/debian/work/
+packaging/debian/out/

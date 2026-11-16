@@ -1,0 +1,7 @@
+#!/bin/sh
+set -e
+if [ "$1" = remove ]; then
+	systemctl disable sp7-camera-boot.timer >/dev/null 2>&1 || true
+	systemctl --global disable sp7-camera-controller.service sp7-audio-fix.service >/dev/null 2>&1 || true
+fi
+exit 0
