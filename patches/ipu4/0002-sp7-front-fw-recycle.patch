@@ -1,0 +1,51 @@
+--- a/linux-6.19.8/drivers/media/pci/intel/ipu-isys-video.c
++++ b/linux-6.19.8/drivers/media/pci/intel/ipu-isys-video.c
+@@ -1940,7 +1940,9 @@
+ 	ipu_put_fw_mgs_buffer(av->isys, (uintptr_t) stream_cfg);
+ 
+ 	if (rval < 0) {
+-		dev_err(dev, "can't open stream (%d)\n", rval);
++		dev_err(dev, "can't open stream (%d) source=%u reset_needed=%d stream_opened=%u video_opened=%u\n",
++			rval, ip->source, av->isys->reset_needed,
++			av->isys->stream_opened, av->isys->video_opened);
+ 		goto out_put_stream_handle;
+ 	}
+ 
+@@ -2456,7 +2458,14 @@
+ 	 *
+ 	 * full_fw_recycle takes precedence if both parameters are enabled.
+ 	 */
+-	if (state && ip->source == 3 &&
++	/*
++	 * SP7 front camera: the OV5693 (firmware source 7) needs the same
++	 * firmware-context recycle. PipeWire keeps the video nodes open, so
++	 * the first-open firmware init never runs between captures and a
++	 * stale stream state makes STREAM_OPEN fail with EPERM ("can't open
++	 * stream (-1)"). Always recycle before the first front stream.
++	 */
++	if (state && (ip->source == 3 || ip->source == 7) &&
+ 	    (sp7_full_fw_recycle_on_first_stream ||
+ 	     sp7_reinit_hw_on_first_stream)) {
+ 		unsigned long flags;
+@@ -2467,9 +2476,10 @@
+ 		spin_unlock_irqrestore(&av->isys->lock, flags);
+ 
+ 		if (first_stream && sp7_full_fw_recycle_on_first_stream &&
+-		    sp7_rear_restart_needs_recycle) {
++		    (sp7_rear_restart_needs_recycle || ip->source == 7)) {
+ 			dev_info(dev,
+-				 "SP7 restart recycle: requested before source-3 restart\n");
++				 "SP7 restart recycle: requested before source-%u start\n",
++				 ip->source);
+ 
+ 			rval = sp7_full_fw_recycle(av->isys);
+ 			if (rval)
+@@ -2647,7 +2657,7 @@
+ 		media_graph_walk_cleanup(&ip->graph);
+ 	av->streaming = state;
+ 
+-	if (!state && ip->source == 3) {
++	if (!state && (ip->source == 3 || ip->source == 7)) {
+ 		sp7_rear_restart_needs_recycle = true;
+ 		dev_info(dev,
+ 			 "SP7 restart recycle: source-3 stopped; next start requires recycle\n");

@@ -1,0 +1,32 @@
+# SP7 override of /usr/lib/udev/rules.d/60-persistent-v4l.rules
+# (same file name in /etc/udev/rules.d masks the packaged one).
+#
+# Do not run v4l_id on the IPU4P ISYS video nodes (PCI 0000:00:05.0).
+# Opening them makes the driver runtime-resume ISYS for each of ~50 nodes; on
+# this Debian boot every probe hung in D state, so udev never finished
+# initializing the nodes and libcamera deferred /dev/media0 forever
+# ("Defer media device /dev/media0 due to N missing dependencies").
+# Without ID_V4L_CAPABILITIES, PipeWire's V4L2 monitor also skips these raw
+# nodes; apps get the cameras through libcamera and v4l2loopback instead.
+
+ACTION=="remove", GOTO="persistent_v4l_end"
+SUBSYSTEM!="video4linux", GOTO="persistent_v4l_end"
+ENV{MAJOR}=="", GOTO="persistent_v4l_end"
+DEVPATH=="/devices/pci0000:00/0000:00:05.0/*", GOTO="persistent_v4l_end"
+
+IMPORT{program}="v4l_id $devnode"
+
+SUBSYSTEMS=="usb", IMPORT{builtin}="usb_id"
+KERNEL=="video*", ENV{ID_SERIAL}=="?*", SYMLINK+="v4l/by-id/$env{ID_BUS}-$env{ID_SERIAL}-video-index$attr{index}"
+
+# check for valid "index" number
+TEST!="index", GOTO="persistent_v4l_end"
+ATTR{index}!="?*", GOTO="persistent_v4l_end"
+
+IMPORT{builtin}="path_id"
+KERNEL=="video*|vbi*", ENV{ID_PATH}=="?*",                   SYMLINK+="v4l/by-path/$env{ID_PATH}-video-index$attr{index}"
+KERNEL=="video*|vbi*", ENV{ID_PATH_WITH_USB_REVISION}=="?*", SYMLINK+="v4l/by-path/$env{ID_PATH_WITH_USB_REVISION}-video-index$attr{index}"
+KERNEL=="audio*",      ENV{ID_PATH}=="?*",                   SYMLINK+="v4l/by-path/$env{ID_PATH}-audio-index$attr{index}"
+KERNEL=="audio*",      ENV{ID_PATH_WITH_USB_REVISION}=="?*", SYMLINK+="v4l/by-path/$env{ID_PATH_WITH_USB_REVISION}-audio-index$attr{index}"
+
+LABEL="persistent_v4l_end"

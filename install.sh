@@ -16,6 +16,10 @@
 
 set -euo pipefail
 
+# Debian: modinfo, depmod, etc. live in /usr/sbin, which is not in a
+# regular user's PATH.
+export PATH="$PATH:/usr/local/sbin:/usr/sbin:/sbin"
+
 ROOT="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)"
 
 EXPECTED_KERNEL="6.19.8-3.surface.fc43.x86_64"
@@ -425,9 +429,36 @@ log "Checking Secure Boot"
 SB_STATE="$(mokutil --sb-state 2>&1 || true)"
 printf '%s\n' "$SB_STATE"
 
+SIGN_MODULES=0
+SIGN_KEY="${SP7_SIGN_KEY:-/var/lib/dkms/mok.key}"
+SIGN_CERT="${SP7_SIGN_CERT:-/var/lib/dkms/mok.pub}"
+SIGN_FILE="$KDIR/scripts/sign-file"
+
 if grep -qi 'SecureBoot enabled' <<<"$SB_STATE"; then
-    die "Secure Boot is enabled. v0.1 installs unsigned external modules."
+    # Debian adaptation: instead of refusing, sign the external modules with
+    # the local DKMS MOK key. The key must be enrolled with
+    # "sudo mokutil --import $SIGN_CERT" (confirmed in MokManager on reboot).
+    if [[ "$BUILD_ONLY" -eq 0 ]]; then
+        sudo test -r "$SIGN_KEY" \
+            || die "Secure Boot is enabled and no signing key exists at $SIGN_KEY."
+        [[ -r "$SIGN_CERT" && -x "$SIGN_FILE" ]] \
+            || die "Secure Boot is enabled but $SIGN_CERT or $SIGN_FILE is missing."
+        SIGN_MODULES=1
+        echo "Secure Boot enabled: modules will be signed with $SIGN_CERT"
+        if ! mokutil --test-key "$SIGN_CERT" 2>&1 | grep -q 'is already enrolled'; then
+            echo "WARNING: $SIGN_CERT is not enrolled yet. Run:"
+            echo "    sudo mokutil --import $SIGN_CERT"
+            echo "and confirm the enrollment in MokManager on the next reboot."
+        fi
+    fi
 fi
+
+sign_module()
+{
+    [[ "$SIGN_MODULES" -eq 1 ]] || return 0
+    sudo "$SIGN_FILE" sha512 "$SIGN_KEY" "$SIGN_CERT" "$1" \
+        || die "Could not sign $1"
+}
 
 # -------------------------------------------------------------------------
 # Source locations
@@ -537,6 +568,11 @@ fetch_commit \
 apply_patch \
     "$IPU4_SRC" \
     "$ROOT/patches/ipu4/0001-sp7-ipu4-isys.patch"
+
+# Front OV5693 (firmware source 7) also needs the fw-context recycle.
+apply_patch \
+    "$IPU4_SRC" \
+    "$ROOT/patches/ipu4/0002-sp7-front-fw-recycle.patch"
 
 [[ -x "$IPU4_SRC/scripts/build-modules.sh" ]] \
     || die "IPU4 build script is missing."
@@ -675,6 +711,8 @@ do
 
     backup_system_file "$MODULE_DEST/$name"
 
+    sign_module "$module"
+
     sudo install \
         -m 0644 \
         "$module" \
@@ -686,6 +724,8 @@ for name in "${IPU4_MODULES[@]}"; do
 
     backup_system_file "$MODULE_DEST/$name"
 
+    sign_module "$module"
+
     sudo install \
         -m 0644 \
         "$module" \
@@ -693,6 +733,8 @@ for name in "${IPU4_MODULES[@]}"; do
 done
 
 backup_system_file "$MODULE_DEST/v4l2loopback.ko"
+
+sign_module "$V4L2_SRC/v4l2loopback.ko"
 
 sudo install \
     -m 0644 \
@@ -720,6 +762,12 @@ fetch_commit \
 apply_patch \
     "$LIBCAMERA_SRC" \
     "$ROOT/patches/libcamera/0001-sp7-camera.patch"
+
+# Front OV5693: enable it in the simple pipeline, force the reliable
+# 2592x1944 sensor mode and downscale in the CPU debayer.
+apply_patch \
+    "$LIBCAMERA_SRC" \
+    "$ROOT/patches/libcamera/0002-sp7-front-camera.patch"
 
 [[ -f "$LIBCAMERA_SRC/src/ipa/simple/data/ov8865.yaml" ]] \
     || die "OV8865 tuning file is missing from the libcamera patch."
@@ -813,6 +861,11 @@ fetch_commit \
 apply_patch \
     "$PIPEWIRE_SRC" \
     "$ROOT/patches/pipewire/0001-sp7-libcamera-profiles.patch"
+
+# Front-standard / front-hq libcamera profiles.
+apply_patch \
+    "$PIPEWIRE_SRC" \
+    "$ROOT/patches/pipewire/0002-sp7-front-camera-profiles.patch"
 
 SP7_ORIGINAL_PKG_CONFIG_PATH="${PKG_CONFIG_PATH:-}"
 
@@ -1053,8 +1106,22 @@ install_system_file \
     /etc/systemd/system/sp7-camera-boot.service \
     0644
 
+install_system_file \
+    "$ROOT/systemd/system/sp7-camera-boot.timer" \
+    /etc/systemd/system/sp7-camera-boot.timer \
+    0644
+
+# Keep udev's v4l_id away from the ~50 raw IPU4P ISYS video nodes.
+install_system_file \
+    "$ROOT/config/udev/60-persistent-v4l.rules" \
+    /etc/udev/rules.d/60-persistent-v4l.rules \
+    0644
+
+sudo udevadm control --reload || true
 sudo systemctl daemon-reload
-sudo systemctl enable sp7-camera-boot.service
+# The timer starts sp7-camera-boot.service 30 s after boot.
+sudo systemctl disable sp7-camera-boot.service 2>/dev/null || true
+sudo systemctl enable sp7-camera-boot.timer
 
 # -------------------------------------------------------------------------
 # Per-user WirePlumber and controller configuration
@@ -1065,11 +1132,27 @@ log "Installing desktop-user configuration"
 WP_DIR="$HOME/.config/wireplumber/wireplumber.conf.d"
 USER_SYSTEMD="$HOME/.config/systemd/user"
 USER_DROPIN="$USER_SYSTEMD/wireplumber.service.d"
+PW_DROPIN="$USER_SYSTEMD/pipewire.service.d"
+WP_SCRIPTS="$HOME/.local/share/wireplumber/scripts"
 
 mkdir -p \
     "$WP_DIR" \
     "$USER_SYSTEMD" \
-    "$USER_DROPIN"
+    "$USER_DROPIN" \
+    "$PW_DROPIN" \
+    "$WP_SCRIPTS"
+
+# Hide the raw sp7.* libcamera nodes from applications: they must use the
+# controller-managed "(V4L2)" nodes, or they race the controller for the IPU.
+install \
+    -m 0644 \
+    "$ROOT/config/wireplumber/wireplumber.conf.d/98-sp7-hide-raw-nodes.conf" \
+    "$WP_DIR/98-sp7-hide-raw-nodes.conf"
+
+install \
+    -m 0644 \
+    "$ROOT/config/wireplumber/scripts/sp7-hide-raw-nodes.lua" \
+    "$WP_SCRIPTS/sp7-hide-raw-nodes.lua"
 
 install \
     -m 0644 \
@@ -1083,8 +1166,37 @@ install \
     "$ROOT/config/wireplumber/wireplumber.conf.d/99-sp7-audio-soft-mixer.conf" \
     "$WP_DIR/99-sp7-audio-soft-mixer.conf"
 
+SYSTEM_SPA_DIR="$(pkg-config --variable=libdir libpipewire-0.3 2>/dev/null || true)/spa-0.2"
+if [[ ! -d "$SYSTEM_SPA_DIR" ]]; then
+    for d in /usr/lib/x86_64-linux-gnu/spa-0.2 /usr/lib64/spa-0.2 /usr/lib/spa-0.2; do
+        [[ -d "$d" ]] && SYSTEM_SPA_DIR="$d" && break
+    done
+fi
+[[ -d "$SYSTEM_SPA_DIR" ]] || die "Could not locate the system SPA plugin directory."
+
+sed "s|/usr/lib64/spa-0.2|$SYSTEM_SPA_DIR|" \
+    "$ROOT/systemd/user/wireplumber.service.d/90-sp7-libcamera-test.conf" \
+    > "$USER_DROPIN/90-sp7-libcamera-test.conf"
+chmod 0644 "$USER_DROPIN/90-sp7-libcamera-test.conf"
+
+# The pipewire daemon hosts the libcamera source nodes, so it needs the same
+# SPA_PLUGIN_DIR / SoftISP environment as WirePlumber.
+sed "s|/usr/lib64/spa-0.2|$SYSTEM_SPA_DIR|" \
+    "$ROOT/systemd/user/pipewire.service.d/90-sp7-libcamera-test.conf" \
+    > "$PW_DROPIN/90-sp7-libcamera-test.conf"
+chmod 0644 "$PW_DROPIN/90-sp7-libcamera-test.conf"
+
 for file in \
-    90-sp7-libcamera-test.conf \
+    95-sp7-softisp-vflip.conf \
+    97-sp7-camera-mode.conf
+do
+    install \
+        -m 0644 \
+        "$ROOT/systemd/user/pipewire.service.d/$file" \
+        "$PW_DROPIN/$file"
+done
+
+for file in \
     95-sp7-softisp-vflip.conf \
     96-sp7-wait-dw9719.conf \
     97-sp7-camera-mode.conf
@@ -1127,7 +1239,7 @@ systemctl --user enable sp7-audio-fix.service
 
 # WirePlumber reads static configuration fragments only at startup.
 # Restart it so the ALC274 soft-mixer rule takes effect immediately.
-systemctl --user restart wireplumber.service
+systemctl --user restart pipewire.service wireplumber.service
 
 # Establish the known-good hardware mixer value after WirePlumber has
 # restarted. This is also required when updating an existing installation

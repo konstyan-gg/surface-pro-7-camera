@@ -1,0 +1,151 @@
+diff --git a/spa/plugins/libcamera/libcamera-device.cpp b/spa/plugins/libcamera/libcamera-device.cpp
+index e127676..aa4bd93 100644
+--- a/spa/plugins/libcamera/libcamera-device.cpp
++++ b/spa/plugins/libcamera/libcamera-device.cpp
+@@ -160,7 +160,10 @@ int emit_info(struct impl *impl, bool full)
+ 
+ 	spa_device_emit_info(&impl->hooks, &info);
+ 
+-	if (model.find("ov8865") != std::string::npos) {
++	const bool sp7Rear = model.find("ov8865") != std::string::npos;
++	const bool sp7Front = model.find("ov5693") != std::string::npos;
++
++	if (sp7Rear || sp7Front) {
+ 		/*
+ 		 * Surface Pro 7 rear camera profiles.
+ 		 *
+@@ -173,13 +176,24 @@ int emit_info(struct impl *impl, bool full)
+ 			uint32_t id;
+ 			const char *profile;
+ 			const char *description;
+-		} sp7Profiles[] = {
+-			{ 0, "hq",     "Surface Rear HQ" },
+-			{ 1, "smooth", "Surface Rear Smooth" },
+-			{ 2, "fast",   "Surface Rear Fast" },
++			const char *nodeName;
++		} sp7RearProfiles[] = {
++			{ 0, "hq",     "Surface Rear HQ",     "sp7.rear.hq" },
++			{ 1, "smooth", "Surface Rear Smooth", "sp7.rear.smooth" },
++			{ 2, "fast",   "Surface Rear Fast",   "sp7.rear.fast" },
++		}, sp7FrontProfiles[] = {
++			/* SP7 front OV5693 profiles */
++			{ 0, "front-standard", "Surface Front Standard", "sp7.front.standard" },
++			{ 1, "front-hq",       "Surface Front HQ",       "sp7.front.hq" },
+ 		};
+ 
+-		for (const auto &profile : sp7Profiles) {
++		const auto *sp7Profiles = sp7Rear ? sp7RearProfiles : sp7FrontProfiles;
++		const size_t sp7NumProfiles = sp7Rear
++			? SPA_N_ELEMENTS(sp7RearProfiles)
++			: SPA_N_ELEMENTS(sp7FrontProfiles);
++
++		for (size_t pi = 0; pi < sp7NumProfiles; ++pi) {
++			const auto &profile = sp7Profiles[pi];
+ 			struct spa_dict_item nodeItems[64];
+ 			uint32_t nNodeItems = 0;
+ 
+@@ -208,8 +222,7 @@ int emit_info(struct impl *impl, bool full)
+ 				"libcamera:" + impl->device_id + ":" +
+ 				profile.profile;
+ 
+-			std::string nodeName =
+-				"sp7.rear." + std::string(profile.profile);
++			std::string nodeName = profile.nodeName;
+ 
+ 			/*
+ 			 * SP7_PROFILED_API_PATH
+diff --git a/spa/plugins/libcamera/libcamera-source.cpp b/spa/plugins/libcamera/libcamera-source.cpp
+index d4b0660..7c7228b 100644
+--- a/spa/plugins/libcamera/libcamera-source.cpp
++++ b/spa/plugins/libcamera/libcamera-source.cpp
+@@ -133,6 +133,14 @@ struct impl {
+ 	 */
+ 	bool sp7HqProfile = false;
+ 
++	/*
++	 * SP7_FRONT_FIXED_OUTPUT
++	 *
++	 * Front OV5693 profiles advertise and produce exactly one
++	 * processed size (the relay/v4l2loopback format).
++	 */
++	libcamera::Size sp7FixedOutput;
++
+ 	static constexpr uint64_t info_all =
+ 		SPA_NODE_CHANGE_MASK_FLAGS |
+ 		SPA_NODE_CHANGE_MASK_PROPS |
+@@ -580,7 +588,9 @@ next_fmt:
+ 		impl->config->sensorConfig &&
+ 		impl->config->sensorConfig->outputSize == Size(1632, 918);
+ 
+-	if (sp7SmoothEnum || sp7HqNativeEnum || sp7FastNativeEnum) {
++	const bool sp7FixedEnum = !impl->sp7FixedOutput.isNull();
++
++	if (sp7FixedEnum || sp7SmoothEnum || sp7HqNativeEnum || sp7FastNativeEnum) {
+ 		/*
+ 		 * One size per pixel format only.
+ 		 *
+@@ -593,7 +603,9 @@ next_fmt:
+ 			goto next_fmt;
+ 		}
+ 
+-		if (sp7SmoothEnum)
++		if (sp7FixedEnum)
++			frameSize = impl->sp7FixedOutput;
++		else if (sp7SmoothEnum)
+ 			frameSize = Size(1628, 1224);
+ 		else if (sp7HqNativeEnum)
+ 			frameSize = Size(3260, 2448);
+@@ -783,7 +795,14 @@ int spa_libcamera_set_format(struct impl *impl, struct port *port,
+ 		impl->config->sensorConfig->outputSize == Size(1632, 918) &&
+ 		format->media_subtype == SPA_MEDIA_SUBTYPE_raw;
+ 
+-	if (sp7SmoothFullFrame) {
++	if (!impl->sp7FixedOutput.isNull() &&
++	    format->media_subtype == SPA_MEDIA_SUBTYPE_raw) {
++		streamConfig.size = impl->sp7FixedOutput;
++
++		spa_log_info(impl->log,
++			     "SP7 Front: fixed processed output %ux%u",
++			     streamConfig.size.width, streamConfig.size.height);
++	} else if (sp7SmoothFullFrame) {
+ 		streamConfig.size = Size(1628, 1224);
+ 
+ 		spa_log_info(impl->log,
+@@ -2553,6 +2572,8 @@ impl_init(const struct spa_handle_factory *factory,
+ 			? nullptr
+ 			: sp7ProfileStorage.c_str();
+ 
++	libcamera::Size sp7FixedOutput;
++
+ 	if (sp7Profile) {
+ 		libcamera::SensorConfiguration sensorConfig;
+ 		sensorConfig.bitDepth = 10;
+@@ -2577,6 +2598,20 @@ impl_init(const struct spa_handle_factory *factory,
+ 			spa_log_info(log,
+ 				     "SP7 profile %s: sensor 1632x918 full-FOV test",
+ 				     sp7Profile);
++		} else if (spa_streq(sp7Profile, "front-standard")) {
++			sensorConfig.outputSize = libcamera::Size(1296, 972);
++			config->sensorConfig = sensorConfig;
++			sp7FixedOutput = libcamera::Size(1292, 972);
++
++			spa_log_info(log,
++				     "SP7 profile front-standard: sensor 1296x972");
++		} else if (spa_streq(sp7Profile, "front-hq")) {
++			sensorConfig.outputSize = libcamera::Size(2592, 1944);
++			config->sensorConfig = sensorConfig;
++			sp7FixedOutput = libcamera::Size(2588, 1944);
++
++			spa_log_info(log,
++				     "SP7 profile front-hq: sensor 2592x1944");
+ 		}
+ 	}
+ 
+@@ -2586,6 +2621,7 @@ impl_init(const struct spa_handle_factory *factory,
+ 
+ 	instance->sp7HqProfile =
+ 		sp7Profile && spa_streq(sp7Profile, "hq");
++	instance->sp7FixedOutput = sp7FixedOutput;
+ 
+ 	spa_log_info(log, "SP7 source profile: %s%s",
+ 		     sp7Profile ? sp7Profile : "none",

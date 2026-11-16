@@ -1,0 +1,143 @@
+diff --git a/src/libcamera/pipeline/simple/simple.cpp b/src/libcamera/pipeline/simple/simple.cpp
+index 4682290..b89832d 100644
+--- a/src/libcamera/pipeline/simple/simple.cpp
++++ b/src/libcamera/pipeline/simple/simple.cpp
+@@ -1378,6 +1378,36 @@ CameraConfiguration::Status SimpleCameraConfiguration::validate()
+ 				<< " unavailable";
+ 	}
+ 
++	/*
++	 * SP7_OV5693_FULL_MODE_ONLY
++	 *
++	 * The front OV5693 2x2-binned 1296x972 mode produces only csi2
++	 * "Frame sync error" on IPU4P (independent of vblank), and the
++	 * failed start leaves the link unusable until reboot. 2592x1944
++	 * streams reliably; smaller outputs are produced by the SoftISP
++	 * SP7 raw prescale (full FOV).
++	 */
++	if (data_->sensor_->model() == "ov5693") {
++		const Size sp7FrontSize(2592, 1944);
++		bool sp7FrontFound = false;
++
++		for (const SimpleCameraData::Configuration *candidate : *configs) {
++			if (candidate->sensorSize == sp7FrontSize &&
++			    candidate->captureSize == sp7FrontSize) {
++				pipeConfig_ = candidate;
++				sp7FrontFound = true;
++				LOG(SimplePipeline, Info)
++					<< "SP7 OV5693: forcing full sensor mode "
++					<< sp7FrontSize;
++				break;
++			}
++		}
++
++		if (!sp7FrontFound)
++			LOG(SimplePipeline, Warning)
++				<< "SP7 OV5693: full sensor mode unavailable";
++	}
++
+ 	LOG(SimplePipeline, Debug)
+ 		<< "Picked "
+ 		<< V4L2SubdeviceFormat{ pipeConfig_->code, pipeConfig_->sensorSize, {} }
+@@ -2077,21 +2107,6 @@ bool SimplePipelineHandler::matchDevice(std::shared_ptr<MediaDevice> media,
+ 	pipelines.reserve(sensors.size());
+ 
+ 	for (MediaEntity *sensor : sensors) {
+-		/*
+-		 * Surface Pro 7 rear-only test.
+-		 *
+-		 * The OV5693 front camera currently fails to produce frames
+-		 * with the IPU4P stack and can leave ISYS requiring a power
+-		 * cycle. Temporarily exclude it while testing the OV8865 rear
+-		 * camera through PipeWire/Snapshot.
+-		 */
+-		if (sensor->name().find("ov5693") != std::string::npos) {
+-			LOG(SimplePipeline, Info)
+-				<< "SP7 rear-only test: skipping OV5693 sensor "
+-				<< sensor->name();
+-			continue;
+-		}
+-
+ 		std::unique_ptr<SimpleCameraData> data =
+ 			std::make_unique<SimpleCameraData>(this, numStreams, sensor);
+ 		if (!data->isValid()) {
+diff --git a/src/libcamera/software_isp/debayer_cpu.cpp b/src/libcamera/software_isp/debayer_cpu.cpp
+index b4d0049..81c5420 100644
+--- a/src/libcamera/software_isp/debayer_cpu.cpp
++++ b/src/libcamera/software_isp/debayer_cpu.cpp
+@@ -724,10 +724,27 @@ int DebayerCpu::configure(const StreamConfiguration &inputCfg,
+ 		inputCfg.size == Size(1632, 918) &&
+ 		outputCfg.size == Size(1404, 792);
+ 
++	/* SP7 front OV5693: full 2592x1944 sensor -> 1292x972, full FOV. */
++	const bool sp7FrontRawPrescale =
++		inputCfg.size == Size(2592, 1944) &&
++		outputCfg.size == Size(1292, 972);
++
++	if (sp7FrontRawPrescale)
++		LOG(Debayer, Debug)
++			<< "SP7 front prescale candidate: in "
++			<< inputCfg.pixelFormat << " bpp " << inputConfig_.bpp
++			<< " pattern " << inputConfig_.patternSize
++			<< " out " << outputCfg.pixelFormat;
++
++	/*
++	 * The prescale only rewrites the Bayer input, so it is independent
++	 * of the output format; the front accepts whatever PipeWire picks.
++	 */
+ 	sp7RawPrescale_ =
+-		(sp7HqRawPrescale || sp7FastRawPrescale) &&
+-		(outputCfg.pixelFormat == formats::ABGR8888 ||
+-		 outputCfg.pixelFormat == formats::XBGR8888) &&
++		(((sp7HqRawPrescale || sp7FastRawPrescale) &&
++		  (outputCfg.pixelFormat == formats::ABGR8888 ||
++		   outputCfg.pixelFormat == formats::XBGR8888)) ||
++		 sp7FrontRawPrescale) &&
+ 		inputConfig_.bpp == 16 &&
+ 		inputConfig_.patternSize == Size(2, 2);
+ 
+@@ -1298,7 +1315,7 @@ void DebayerCpu::process(uint32_t frame, FrameBuffer *input, FrameBuffer *output
+ 		return value && value[0] == '1';
+ 	}();
+ 
+-	if (verticalFlip) {
++	if (verticalFlip && sp7FlipAllowed_) {
+ 		uint8_t *data = out.planes()[0].data();
+ 		const unsigned int width = window_.width;
+ 		const unsigned int height = window_.height;
+diff --git a/src/libcamera/software_isp/debayer_cpu.h b/src/libcamera/software_isp/debayer_cpu.h
+index 4e4c032..eb68093 100644
+--- a/src/libcamera/software_isp/debayer_cpu.h
++++ b/src/libcamera/software_isp/debayer_cpu.h
+@@ -35,6 +35,9 @@ public:
+ 	DebayerCpu(std::unique_ptr<SwStatsCpu> stats, const CameraManager &cm);
+ 	~DebayerCpu();
+ 
++	/* SP7: apply LIBCAMERA_SOFTISP_VFLIP only to the rear OV8865. */
++	bool sp7FlipAllowed_ = false;
++
+ 	int configure(const StreamConfiguration &inputCfg,
+ 		      const std::vector<std::reference_wrapper<const StreamConfiguration>> &outputCfgs,
+ 		      bool ccmEnabled) override;
+diff --git a/src/libcamera/software_isp/software_isp.cpp b/src/libcamera/software_isp/software_isp.cpp
+index a09593f..7b1211d 100644
+--- a/src/libcamera/software_isp/software_isp.cpp
++++ b/src/libcamera/software_isp/software_isp.cpp
+@@ -130,8 +130,15 @@ SoftwareIsp::SoftwareIsp(PipelineHandler *pipe, const CameraSensor *sensor,
+ 	}
+ 
+ #endif
+-	if (!debayer_)
+-		debayer_ = std::make_unique<DebayerCpu>(std::move(stats), cm);
++	if (!debayer_) {
++		auto cpu = std::make_unique<DebayerCpu>(std::move(stats), cm);
++		/*
++		 * SP7: only the rear OV8865 is mounted upside down. The front
++		 * OV5693 delivers an upright image and must not be flipped.
++		 */
++		cpu->sp7FlipAllowed_ = sensor->model() == "ov8865";
++		debayer_ = std::move(cpu);
++	}
+ 
+ 	debayer_->inputBufferReady.connect(this, &SoftwareIsp::inputReady);
+ 	debayer_->outputBufferReady.connect(this, &SoftwareIsp::outputReady);

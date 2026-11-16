@@ -1,0 +1,11 @@
+[Unit]
+Description=Delayed Surface Pro 7 IPU4P camera initialization
+# Loading IPU4P too early after power-on makes CSE firmware auth fail
+# ("Expect magic number timeout" / "CSE boot_load failed").
+
+[Timer]
+OnBootSec=30s
+AccuracySec=1s
+
+[Install]
+WantedBy=timers.target

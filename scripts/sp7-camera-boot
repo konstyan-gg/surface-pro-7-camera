@@ -31,6 +31,26 @@ if [ -e /dev/media0 ]; then
     exit 0
 fi
 
+# Debian kernels (CONFIG_INTEL_IOMMU_DEFAULT_ON=y) put every PCI device into a
+# translated VT-d domain (DMA-FQ). The IPU4P's internal MMU programs raw
+# physical addresses (virt_to_phys in ipu-mmu.c), so under translation every
+# IPU/CSE DMA faults ("DMAR: ... [00:05.0] ... PTE Read access is not set") and
+# firmware authentication never succeeds ("Expect magic number timeout").
+# Switch only the IPU's IOMMU group to identity (passthrough). This must
+# happen while no driver is bound to 0000:00:05.0, i.e. before modprobe.
+IPU_GRP_TYPE="/sys/bus/pci/devices/0000:00:05.0/iommu_group/type"
+if [ -e "$IPU_GRP_TYPE" ]; then
+    CUR_TYPE="$(cat "$IPU_GRP_TYPE")"
+    if [ "$CUR_TYPE" != "identity" ]; then
+        log "IOMMU-Domain der IPU: $CUR_TYPE -> identity"
+        if ! echo identity > "$IPU_GRP_TYPE"; then
+            log "FEHLER: IOMMU-Domain der IPU konnte nicht auf identity gesetzt werden."
+            exit 1
+        fi
+    fi
+    log "IOMMU-Domain der IPU: $(cat "$IPU_GRP_TYPE")"
+fi
+
 log "Lade IPU4P kontrolliert."
 
 MODULES=(
