@@ -98,8 +98,8 @@ SHA-256 (`sp7-camera-fetch-firmware`).
 ### 2. Install
 
     mkdir sp7 && cd sp7
-    for f in sp7-camera-dkms_0.2.0-1_all.deb sp7-camera_0.2.0-1_amd64.deb install-debs.sh SHA256SUMS; do
-        curl -fLO https://github.com/konstyan-gg/surface-pro-7-camera/releases/download/v0.2.0/$f
+    for f in sp7-camera-dkms_0.2.1-1_all.deb sp7-camera_0.2.1-1_amd64.deb install-debs.sh SHA256SUMS; do
+        curl -fLO https://github.com/konstyan-gg/surface-pro-7-camera/releases/download/v0.2.1/$f
     done
     sha256sum -c SHA256SUMS
     bash install-debs.sh .
