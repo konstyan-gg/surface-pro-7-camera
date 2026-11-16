@@ -59,4 +59,4 @@ sudo /usr/local/sbin/sp7-camera-fetch-firmware
 dkms status sp7-camera || true
 systemctl --user daemon-reload || true
 echo
-echo "Installed. Reboot; the cameras appear ~30 s after boot as /dev/video80-84."
+echo "Installed. Reboot; the cameras appear during boot as /dev/video80-84."

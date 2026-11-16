@@ -19,7 +19,7 @@ PipeWire and V4L2 applications to work on Debian. The upstream Fedora
 | Packaging | `sp7-camera-dkms` (kernel modules, rebuilt for every kernel) and `sp7-camera` (userspace) `.deb` packages; `packaging/debian/` |
 | Secure Boot | Modules are signed with the DKMS MOK key instead of refusing to install |
 | IOMMU | `sp7-camera-boot` puts only the IPU's IOMMU group (`0000:00:05.0`) into identity mode before loading IPU4P. Without it the IPU's raw-physical DMA is blocked by VT-d and CSE firmware authentication fails. **No `iommu=pt` kernel parameter and no GRUB change are needed.** |
-| Boot timing | `sp7-camera-boot.timer` loads the IPU4P stack 30 s after boot |
+| Boot timing | `sp7-camera-boot.service` loads the IPU4P stack right after udev coldplug (about 11 s into boot); the old 30 s timer is gone, since the CSE auth failures it worked around were caused by the IOMMU |
 | udev | `60-persistent-v4l.rules` skips `v4l_id` on the ~50 raw IPU ISYS nodes (they could hang in D state) |
 | Front camera, kernel | `patches/ipu4/0002-sp7-front-fw-recycle.patch`: firmware-context recycle before every front (source 7) start; fixes `can't open stream (-1)` after the first PipeWire use |
 | Front camera, libcamera | `patches/libcamera/0002-sp7-front-camera.patch`: front sensor enabled, VFLIP limited to OV8865, OV5693 forced to the reliable 2592x1944 mode (the binned 1296x972 mode gave CSI "Frame sync error"), CPU-debayer prescale to 1292x972 |
@@ -77,7 +77,7 @@ Prebuilt packages are attached to the [GitHub releases](https://github.com/konst
 | File | Contents |
 | --- | --- |
 | `sp7-camera-dkms_<ver>_all.deb` | Kernel module **sources**; DKMS builds and signs them for each installed kernel |
-| `sp7-camera_<ver>_amd64.deb` | Patched libcamera 0.7.2, PipeWire libcamera SPA, controller/relays, boot loader + timer, modprobe/udev/WirePlumber/systemd config |
+| `sp7-camera_<ver>_amd64.deb` | Patched libcamera 0.7.2, PipeWire libcamera SPA, controller/relays, boot loader, modprobe/udev/WirePlumber/systemd config |
 | `install-debs.sh`, `SHA256SUMS` | Installer and checksums |
 
 The proprietary Intel IPU4P firmware is **not** in the packages. The
@@ -132,7 +132,7 @@ the packages to skip re-enrollment.
 
     sudo reboot
 
-About 30 seconds after boot the timer loads the IPU4P stack. Check:
+`sp7-camera-boot.service` loads the IPU4P stack during boot. Check:
 
     systemctl status sp7-camera-boot.service
     ls /dev/video8[0-4]

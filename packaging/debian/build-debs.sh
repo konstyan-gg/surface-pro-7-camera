@@ -6,7 +6,7 @@
 #   sp7-camera-dkms_<ver>_all.deb     kernel modules as DKMS source
 #                                     (rebuilt + signed for every kernel)
 #   sp7-camera_<ver>_amd64.deb        patched libcamera + PipeWire libcamera SPA,
-#                                     controller/relays, boot loader + timer,
+#                                     controller/relays, boot loader,
 #                                     modprobe/udev/WirePlumber/systemd config
 #   sp7-camera-firmware_<ver>_all.deb only with --with-firmware (proprietary
 #                                     Intel blob: build it locally, do not publish)
@@ -201,7 +201,6 @@ put 0644 "$ROOT/config/modules-load.d/sp7-v4l2loopback.conf" /etc/modules-load.d
 put 0644 "$ROOT/config/udev/60-persistent-v4l.rules"     /etc/udev/rules.d/60-persistent-v4l.rules
 mkdir -p "$U/etc/ld.so.conf.d"; echo /usr/local/lib64 > "$U/etc/ld.so.conf.d/sp7-camera.conf"
 put 0644 "$ROOT/systemd/system/sp7-camera-boot.service" /usr/lib/systemd/system/sp7-camera-boot.service
-put 0644 "$ROOT/systemd/system/sp7-camera-boot.timer"   /usr/lib/systemd/system/sp7-camera-boot.timer
 for f in sp7-camera-controller.service sp7-camera-relay@.service sp7-audio-fix.service; do
 	put 0644 "$ROOT/systemd/user/$f" "/usr/lib/systemd/user/$f"
 done

@@ -1106,11 +1106,6 @@ install_system_file \
     /etc/systemd/system/sp7-camera-boot.service \
     0644
 
-install_system_file \
-    "$ROOT/systemd/system/sp7-camera-boot.timer" \
-    /etc/systemd/system/sp7-camera-boot.timer \
-    0644
-
 # Keep udev's v4l_id away from the ~50 raw IPU4P ISYS video nodes.
 install_system_file \
     "$ROOT/config/udev/60-persistent-v4l.rules" \
@@ -1119,9 +1114,12 @@ install_system_file \
 
 sudo udevadm control --reload || true
 sudo systemctl daemon-reload
-# The timer starts sp7-camera-boot.service 30 s after boot.
-sudo systemctl disable sp7-camera-boot.service 2>/dev/null || true
-sudo systemctl enable sp7-camera-boot.timer
+# sp7-camera-boot.service runs as soon as udev has coldplugged the IPU; no
+# delay is needed. Remove the 30 s timer that older versions installed.
+sudo systemctl disable sp7-camera-boot.timer 2>/dev/null || true
+sudo rm -f /etc/systemd/system/sp7-camera-boot.timer
+sudo systemctl daemon-reload
+sudo systemctl enable sp7-camera-boot.service
 
 # -------------------------------------------------------------------------
 # Per-user WirePlumber and controller configuration

@@ -1,6 +1,11 @@
 [Unit]
 Description=Surface Pro 7 IPU4P camera initialization
-After=systemd-modules-load.service local-fs.target
+# Needs the IPU PCI device, firmware/modules on disk, and udev coldplug done
+# (INT3472/sensor/VCM ACPI devices). No fixed delay: the CSE auth failures that
+# once motivated a 30 s timer were caused by the IOMMU, which the script fixes.
+Wants=systemd-udev-trigger.service
+After=systemd-modules-load.service local-fs.target systemd-udev-trigger.service
+After=sys-devices-pci0000:00-0000:00:05.0.device
 Before=display-manager.service graphical.target
 
 [Service]
