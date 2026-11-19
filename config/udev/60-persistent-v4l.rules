@@ -14,6 +14,18 @@ SUBSYSTEM!="video4linux", GOTO="persistent_v4l_end"
 ENV{MAJOR}=="", GOTO="persistent_v4l_end"
 DEVPATH=="/devices/pci0000:00/0000:00:05.0/*", GOTO="persistent_v4l_end"
 
+# Stable names for the SP7 v4l2loopback cameras. Being virtual they get no
+# by-id/by-path link, so /dev/v4l would not exist at all. Debian's OBS 30.2
+# (patch linux-v4l2-Save-device-by-id-or-path) crashes in the
+# "Video Capture Device (V4L2)" properties unless both /dev/v4l/by-id and
+# /dev/v4l/by-path exist and are non-empty (NULL list dereference, and
+# free() of an uninitialized pointer when scandir() fails).
+DEVPATH=="/devices/virtual/video4linux/video80", SYMLINK+="v4l/by-id/sp7-rear-standard v4l/by-path/sp7-rear-standard"
+DEVPATH=="/devices/virtual/video4linux/video81", SYMLINK+="v4l/by-id/sp7-rear-hq v4l/by-path/sp7-rear-hq"
+DEVPATH=="/devices/virtual/video4linux/video82", SYMLINK+="v4l/by-id/sp7-rear-fast v4l/by-path/sp7-rear-fast"
+DEVPATH=="/devices/virtual/video4linux/video83", SYMLINK+="v4l/by-id/sp7-front-standard v4l/by-path/sp7-front-standard"
+DEVPATH=="/devices/virtual/video4linux/video84", SYMLINK+="v4l/by-id/sp7-front-hq v4l/by-path/sp7-front-hq"
+
 IMPORT{program}="v4l_id $devnode"
 
 SUBSYSTEMS=="usb", IMPORT{builtin}="usb_id"

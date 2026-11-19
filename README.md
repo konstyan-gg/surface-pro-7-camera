@@ -20,7 +20,7 @@ PipeWire and V4L2 applications to work on Debian. The upstream Fedora
 | Secure Boot | Modules are signed with the DKMS MOK key instead of refusing to install |
 | IOMMU | `sp7-camera-boot` puts only the IPU's IOMMU group (`0000:00:05.0`) into identity mode before loading IPU4P. Without it the IPU's raw-physical DMA is blocked by VT-d and CSE firmware authentication fails. **No `iommu=pt` kernel parameter and no GRUB change are needed.** |
 | Boot timing | `sp7-camera-boot.service` loads the IPU4P stack right after udev coldplug (about 11 s into boot); the old 30 s timer is gone, since the CSE auth failures it worked around were caused by the IOMMU |
-| udev | `60-persistent-v4l.rules` skips `v4l_id` on the ~50 raw IPU ISYS nodes (they could hang in D state) |
+| udev | `60-persistent-v4l.rules` skips `v4l_id` on the ~50 raw IPU ISYS nodes (they could hang in D state) and adds `/dev/v4l/by-id/sp7-*` and `/dev/v4l/by-path/sp7-*` links for the five cameras (Debian's OBS 30.2 V4L2 source crashes unless both exist) |
 | Front camera, kernel | `patches/ipu4/0002-sp7-front-fw-recycle.patch`: firmware-context recycle before every front (source 7) start; fixes `can't open stream (-1)` after the first PipeWire use |
 | Front camera, libcamera | `patches/libcamera/0002-sp7-front-camera.patch`: front sensor enabled, VFLIP limited to OV8865, OV5693 forced to the reliable 2592x1944 mode (the binned 1296x972 mode gave CSI "Frame sync error"), CPU-debayer prescale to 1292x972 |
 | Front camera, PipeWire | `patches/pipewire/0002-sp7-front-camera-profiles.patch`: `front-standard` / `front-hq` libcamera profiles |
@@ -28,6 +28,7 @@ PipeWire and V4L2 applications to work on Debian. The upstream Fedora
 | WirePlumber | `sp7-hide-raw-nodes.lua` hides the raw `sp7.*` libcamera nodes from applications. Apps that switched to them raced the controller for the IPU and could wedge the front sensor until reboot |
 | Relay profiles | Integer frame rates in `config/profiles/*.env` (30/1, 14/1, 60/1). The fractional rates made PipeWire's clock run backwards and froze `(V4L2)` streams after 1–2 frames |
 | v4l2loopback | `max_buffers=8` |
+| PipeWire V4L2 SPA | `patches/pipewire/0003-spa-v4l2-fixed-buffer-count-drivers.patch`: v4l2loopback always allocates 8 buffers and dequeues any of them, but stock PipeWire 1.4 let clients (OBS "Video Capture Device (PipeWire)") use 4, so the pipewire daemon segfaulted. The plugin now advertises the driver's minimum buffer count and drops frames in unknown buffers instead of crashing; installed to `/usr/local/lib64/spa-0.2/v4l2/` |
 
 ## Status
 
@@ -98,8 +99,8 @@ SHA-256 (`sp7-camera-fetch-firmware`).
 ### 2. Install
 
     mkdir sp7 && cd sp7
-    for f in sp7-camera-dkms_0.2.2-1_all.deb sp7-camera_0.2.2-1_amd64.deb install-debs.sh SHA256SUMS; do
-        curl -fLO https://github.com/konstyan-gg/surface-pro-7-camera/releases/download/v0.2.2/$f
+    for f in sp7-camera-dkms_0.2.3-1_all.deb sp7-camera_0.2.3-1_amd64.deb install-debs.sh SHA256SUMS; do
+        curl -fLO https://github.com/konstyan-gg/surface-pro-7-camera/releases/download/v0.2.3/$f
     done
     sha256sum -c SHA256SUMS
     bash install-debs.sh .
@@ -215,6 +216,39 @@ without installing anything.
 | DKMS build fails on a new kernel | `/var/lib/dkms/sp7-camera/<ver>/build/make.log`; boot the 6.19 surface kernel or port the patches |
 | `(V4L2)` camera shows a frozen picture | Make sure `/usr/local/share/sp7-camera/*.env` have integer `FPS_NUM`/`FPS_DEN` |
 | Camera stuck after an error | Reboot. **Never `rmmod` / reload the IPU modules live**; that wedges the IPU |
+| Firefox lists dozens of cameras and none of them work | Enable PipeWire camera access in Firefox (see below) |
+
+### OBS Studio
+
+Both camera sources work:
+
+- **Video Capture Device (PipeWire)**: pick one of the "(V4L2)" cameras.
+  Without the patched V4L2 SPA (0003) the PipeWire daemon crashed as soon
+  as OBS started the stream (black image, `Broken pipe` in the OBS log).
+- **Video Capture Device (V4L2)**: pick an `sp7-…` entry at the top of the
+  list (e.g. "Rear Standard (sp7-rear-standard)"), not the `ipu4p` nodes.
+  Debian's OBS 30.2 crashes when opening this source's properties unless
+  both `/dev/v4l/by-id` and `/dev/v4l/by-path` exist; the udev rule creates
+  `sp7-*` links in both for the five cameras.
+
+### Firefox
+
+By default Firefox enumerates every `/dev/video*` node directly. On the
+Surface Pro 7 that includes about 55 internal IPU nodes, which are not usable
+cameras, so the camera list is long and nothing works. The usable cameras are
+reachable only through PipeWire. Enable PipeWire camera access in Firefox:
+
+- open `about:config` and set `media.webrtc.camera.allow-pipewire` to `true`, or
+- add this line to `user.js` in your Firefox profile directory
+  (`~/.config/mozilla/firefox/<profile>/` or `~/.mozilla/firefox/<profile>/`):
+
+  ```js
+  user_pref("media.webrtc.camera.allow-pipewire", true);
+  ```
+
+Restart Firefox. On the first camera request, the desktop portal asks for
+permission. After that, Firefox lists only the five `(V4L2)` cameras
+(Rear Standard/HQ/Fast, Front Standard/HQ).
 
 ## Source bases
 

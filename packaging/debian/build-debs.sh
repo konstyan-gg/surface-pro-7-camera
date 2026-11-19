@@ -165,10 +165,11 @@ meson setup "$WORK/pipewire-build" "$SRC/pipewire" \
 	--prefix="$WORK/pipewire-prefix" --libdir=lib64 --buildtype=debugoptimized \
 	-Dlibcamera=enabled -Ddbus=disabled -Dsystemd=disabled -Dselinux=disabled \
 	-Dgstreamer=disabled -Dgstreamer-device-provider=disabled -Dalsa=disabled \
-	-Dbluez5=disabled -Djack=disabled -Dv4l2=disabled -Dudev=disabled \
+	-Dbluez5=disabled -Djack=disabled -Dv4l2=enabled -Dudev=enabled \
 	-Dsdl2=disabled -Dtests=disabled -Dexamples=disabled -Dman=disabled \
 	-Ddocs=disabled -Dsession-managers=[]
-ninja -C "$WORK/pipewire-build" -j"$(nproc)" spa/plugins/libcamera/libspa-libcamera.so
+ninja -C "$WORK/pipewire-build" -j"$(nproc)" spa/plugins/libcamera/libspa-libcamera.so \
+	spa/plugins/v4l2/libspa-v4l2.so
 
 log "Helpers"
 mkdir -p "$WORK/helpers"
@@ -185,6 +186,10 @@ cp -a "$LC_STAGE$L/share/libcamera" "$U$L/share/"
 cp -a "$LC_STAGE$L/bin/cam" "$LC_STAGE$L/bin/libcamerify" "$U$L/bin/"
 put 0755 "$WORK/pipewire-build/spa/plugins/libcamera/libspa-libcamera.so" \
 	"$L/lib64/spa-0.2/libcamera/libspa-libcamera.so"
+# Patched V4L2 SPA (0003): stock 1.4.x crashes the pipewire daemon when a
+# client (e.g. OBS) uses fewer buffers than v4l2loopback allocates.
+put 0755 "$WORK/pipewire-build/spa/plugins/v4l2/libspa-v4l2.so" \
+	"$L/lib64/spa-0.2/v4l2/libspa-v4l2.so"
 put 0755 "$WORK/helpers/sp7-camera-relay"        "$L/libexec/sp7-camera-relay"
 put 0755 "$WORK/helpers/sp7-camera-client-usage" "$L/libexec/sp7-camera-client-usage"
 put 0755 "$ROOT/src/sp7-camera-controller"       "$L/libexec/sp7-camera-controller"
